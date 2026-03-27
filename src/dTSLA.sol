@@ -1,36 +1,82 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+// OpenZeppelin: standard ERC20 token implementation
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+// OpenZeppelin: ownership control (only owner can call certain functions)
 import "@openzeppelin/contracts/access/Ownable.sol";
+// Chainlink: interface to read real-world price data on-chain
 import "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 
 /**
  * @title dTSLA
- * @notice Directly backed Tesla stock token on Ethereum Sepolia
- * @dev 1 dTSLA = 1 TSLA share worth of USDC collateral
+ * @author Aibar (NU'26)
+ * @notice This contract tokenizes Tesla (TSLA) stock as an ERC20 token on Ethereum Sepolia
+ * @dev Real World Asset (RWA) tokenization using Chainlink Price Feeds
+ *
+ * How it works:
+ * 1. User deposits MockUSDC as collateral
+ * 2. Contract fetches real TSLA price from Chainlink
+ * 3. Contract mints dTSLA tokens proportional to deposited collateral
+ * 4. User can burn dTSLA tokens to redeem their USDC back
+ *
+ * Collateral Ratio: 200% (overcollateralized for safety)
+ * Example: To mint $100 worth of dTSLA, user must deposit $200 of USDC
  */
 contract dTSLA is ERC20, Ownable {
-    
-    // Chainlink Price Feed addresses on Sepolia
+
+    // ========================
+    // STATE VARIABLES
+    // ========================
+
+    /// @notice Chainlink price feed for TSLA/USD on Sepolia
     AggregatorV3Interface internal tslaFeed;
+
+    /// @notice Chainlink price feed for USDC/USD on Sepolia
     AggregatorV3Interface internal usdcUsdFeed;
 
-    // Collateral token (USDC on Sepolia)
+    /// @notice Address of the USDC token used as collateral
     address public usdcToken;
 
-    // How much USDC is deposited per user
+    /// @notice Tracks how much USDC each user has deposited
     mapping(address => uint256) public usdcDeposited;
 
-    // Minimum collateral ratio: 200% (overcollateralized for safety)
+    // ========================
+    // CONSTANTS
+    // ========================
+
+    /// @notice 200% collateral ratio - user must deposit 2x the value they want to mint
     uint256 public constant COLLATERAL_RATIO = 200;
+
+    /// @notice Used to calculate percentage (divide by 100)
     uint256 public constant COLLATERAL_PRECISION = 100;
+
+    /// @notice Standard precision for ERC20 tokens (18 decimals)
     uint256 public constant PRECISION = 1e18;
+
+    /// @notice Chainlink price feeds return prices with 8 decimals
     uint256 public constant FEED_PRECISION = 1e8;
 
+    // ========================
+    // EVENTS
+    // ========================
+
+    /// @notice Emitted when a user mints dTSLA tokens
     event Minted(address indexed user, uint256 usdcDeposited, uint256 dTslaMinted);
+
+    /// @notice Emitted when a user redeems dTSLA tokens for USDC
     event Redeemed(address indexed user, uint256 dTslaBurned, uint256 usdcReturned);
 
+    // ========================
+    // CONSTRUCTOR
+    // ========================
+
+    /**
+     * @notice Initializes the dTSLA contract with price feeds and collateral token
+     * @param _tslaFeed Address of the Chainlink TSLA/USD price feed on Sepolia
+     * @param _usdcUsdFeed Address of the Chainlink USDC/USD price feed on Sepolia
+     * @param _usdcToken Address of the USDC token contract used as collateral
+     */
     constructor(
         address _tslaFeed,
         address _usdcUsdFeed,
@@ -41,62 +87,77 @@ contract dTSLA is ERC20, Ownable {
         usdcToken = _usdcToken;
     }
 
+    // ========================
+    // MAIN FUNCTIONS
+    // ========================
+
     /**
-     * @notice Deposit USDC and mint dTSLA tokens
-     * @param usdcAmount Amount of USDC to deposit (6 decimals)
+     * @notice Deposit USDC and receive dTSLA tokens
+     * @dev Uses Chainlink price feed to calculate how many dTSLA to mint
+     * @param usdcAmount Amount of USDC to deposit (6 decimals, e.g. 1000000 = 1 USDC)
+     *
+     * Formula: dTSLA = (usdcAmount * 100) / (tslaPrice * 200)
+     * Example: deposit $200 USDC, TSLA = $250 → mint 0.4 dTSLA
      */
     function mintDTsla(uint256 usdcAmount) external {
-        // Get current TSLA price in USD
+        // Step 1: Get current TSLA price from Chainlink (8 decimals)
         uint256 tslaPrice = getTslaPrice();
 
-        // Calculate how many dTSLA tokens to mint
-        // With 200% collateral ratio: dTSLA = (usdcAmount * 100) / (tslaPrice * 200)
-        uint256 dTslaToMint = (usdcAmount * COLLATERAL_PRECISION * PRECISION) 
+        // Step 2: Calculate dTSLA tokens to mint based on collateral ratio
+        // With 200% ratio: user gets half the value they deposit
+        uint256 dTslaToMint = (usdcAmount * COLLATERAL_PRECISION * PRECISION)
                               / (tslaPrice * COLLATERAL_RATIO * FEED_PRECISION);
 
-        // Transfer USDC from user to contract
+        // Step 3: Pull USDC from user's wallet into this contract
         bool success = IERC20(usdcToken).transferFrom(msg.sender, address(this), usdcAmount);
         require(success, "USDC transfer failed");
 
-        // Record deposit
+        // Step 4: Record the deposit for later redemption
         usdcDeposited[msg.sender] += usdcAmount;
 
-        // Mint dTSLA tokens to user
+        // Step 5: Mint dTSLA tokens to the user
         _mint(msg.sender, dTslaToMint);
 
         emit Minted(msg.sender, usdcAmount, dTslaToMint);
     }
 
     /**
-     * @notice Burn dTSLA tokens and redeem USDC collateral
-     * @param dTslaAmount Amount of dTSLA to burn
+     * @notice Burn dTSLA tokens and get USDC collateral back
+     * @dev Uses current TSLA price to calculate USDC to return
+     * @param dTslaAmount Amount of dTSLA tokens to burn
      */
     function redeemDTsla(uint256 dTslaAmount) external {
-        // Get current TSLA price
+        // Step 1: Get current TSLA price from Chainlink
         uint256 tslaPrice = getTslaPrice();
 
-        // Calculate USDC to return
+        // Step 2: Calculate how much USDC to return
         uint256 usdcToReturn = (dTslaAmount * tslaPrice * COLLATERAL_RATIO * FEED_PRECISION)
                                / (COLLATERAL_PRECISION * PRECISION);
 
-        // Check user has enough deposited
+        // Step 3: Ensure user has enough collateral recorded
         require(usdcDeposited[msg.sender] >= usdcToReturn, "Not enough collateral");
 
-        // Update state
+        // Step 4: Update user's deposit record
         usdcDeposited[msg.sender] -= usdcToReturn;
 
-        // Burn dTSLA tokens
+        // Step 5: Burn the dTSLA tokens
         _burn(msg.sender, dTslaAmount);
 
-        // Return USDC to user
+        // Step 6: Return USDC to the user
         bool success = IERC20(usdcToken).transfer(msg.sender, usdcToReturn);
         require(success, "USDC return failed");
 
         emit Redeemed(msg.sender, dTslaAmount, usdcToReturn);
     }
 
+    // ========================
+    // VIEW FUNCTIONS
+    // ========================
+
     /**
-     * @notice Get latest TSLA price in USD (8 decimals)
+     * @notice Fetches the latest TSLA/USD price from Chainlink
+     * @return price Current TSLA price in USD with 8 decimals
+     * Example: 25000000000 = $250.00
      */
     function getTslaPrice() public view returns (uint256) {
         (, int256 price,,,) = tslaFeed.latestRoundData();
@@ -105,7 +166,9 @@ contract dTSLA is ERC20, Ownable {
     }
 
     /**
-     * @notice Get latest USDC/USD price (8 decimals)
+     * @notice Fetches the latest USDC/USD price from Chainlink
+     * @return price Current USDC price in USD with 8 decimals
+     * Example: 100000000 = $1.00
      */
     function getUsdcPrice() public view returns (uint256) {
         (, int256 price,,,) = usdcUsdFeed.latestRoundData();
@@ -114,7 +177,9 @@ contract dTSLA is ERC20, Ownable {
     }
 
     /**
-     * @notice Get total collateral value in USD
+     * @notice Returns total USDC deposited by a specific user
+     * @param user Wallet address of the user
+     * @return Total USDC deposited in 6 decimal format
      */
     function getTotalCollateralValue(address user) public view returns (uint256) {
         return usdcDeposited[user];
