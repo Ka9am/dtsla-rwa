@@ -78,3 +78,10 @@ contract PropertyToken is ERC20, Ownable {
         emit FundingClosed();
     }
 }
+
+
+// Admin deploys it with a property name, token price, and max supply
+// Students call buyTokens() and send ETH
+// They receive tokens proportional to what they sent
+// ETH goes straight to the treasury
+// When sold out (or admin closes it), no more tokens can be bought
