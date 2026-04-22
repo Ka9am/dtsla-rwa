@@ -96,10 +96,10 @@ contract PropertyMarketplace is Ownable, ReentrancyGuard {
         propertyCount++;
     }
 
-    /**
-     * @notice Student invests ETH into a property and receives tokens.
-     * nonReentrant prevents reentrancy attacks.
-     */
+        /**
+    * @notice Student invests ETH into a property and receives tokens.
+    * nonReentrant prevents reentrancy attacks.
+    */
     function invest(uint256 propertyId) external payable nonReentrant {
         Property storage property = properties[propertyId];
 
@@ -113,13 +113,21 @@ contract PropertyMarketplace is Ownable, ReentrancyGuard {
         // Calculate tokens to receive
         uint256 tokensToMint = msg.value / property.tokenPrice;
 
-        // Call buyTokens on the PropertyToken contract
-        // Forward the ETH along with the call
-        property.token.buyTokens{value: msg.value}();
+        // Make sure we don't exceed max supply
+        require(
+            property.token.totalSupply() + tokensToMint <= property.maxTokens,
+            "Exceeds max supply"
+        );
+
+        // Send ETH to treasury directly
+        (bool success, ) = property.token.treasury().call{value: msg.value}("");
+        require(success, "ETH transfer failed");
+
+        // Mint tokens directly to the investor (msg.sender)
+        property.token.mintTo(msg.sender, tokensToMint);
 
         emit Invested(propertyId, msg.sender, msg.value, tokensToMint);
     }
-
     /**
      * @notice Admin can deactivate a property listing.
      */

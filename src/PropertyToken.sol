@@ -77,6 +77,23 @@ contract PropertyToken is ERC20, Ownable {
         fundingOpen = false;
         emit FundingClosed();
     }
+
+    /**
+ * @notice Mints tokens directly to a specific address.
+ * Only callable by the marketplace contract (owner).
+ */
+function mintTo(address recipient, uint256 amount) external onlyOwner {
+    require(fundingOpen, "Funding is closed");
+    require(totalSupply() + amount <= maxSupply, "Exceeds max supply");
+
+    _mint(recipient, amount);
+
+    // Auto-close funding if fully sold out
+    if (totalSupply() == maxSupply) {
+        fundingOpen = false;
+        emit FundingClosed();
+    }
+}
 }
 
 
