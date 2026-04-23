@@ -1,8 +1,6 @@
-// Адреса контрактов задеплоенных на Sepolia testnet
 export const ADDRESSES = {
-  marketplace: "0x7d85Eb468EA84348c165FE2b543B20B2ED166293",
-  rentalYield: "0xf97F0eaaDd59C523D8A944a81C34781196130814",
+  marketplace: "0x2BFEb1E006890A5a8f0436bDD3DCFc8bD4743D99",
+  rentalYield: "0x01014968de4Ebaca9C3a4E8e960533d1bC9F8dDC",
 };
 
-// ID сети Sepolia
 export const SEPOLIA_CHAIN_ID = 11155111;

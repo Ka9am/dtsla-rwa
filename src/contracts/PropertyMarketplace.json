@@ -176,6 +176,24 @@
   },
   {
     "type": "function",
+    "name": "setTokenRentalYield",
+    "inputs": [
+      {
+        "name": "propertyId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "rentalYieldAddress",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "transferOwnership",
     "inputs": [
       {
